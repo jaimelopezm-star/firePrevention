@@ -9,5 +9,5 @@ class PasUsuario(Base):
     id = Column(Integer, primary_key=True)
     hashed_password = Column(String(255), nullable=False)
 
-    # La relación viene desde el usuario que tiene pasusuario_id
+    # ✅ Relación CORRECTA (User tiene pasusuario_id)
     usuario = relationship("User", back_populates="pasusuario", uselist=False)

@@ -15,7 +15,7 @@ from core.crypto_new import CryptoManager
 router = APIRouter(tags=["Authentication"])
 
 @router.post("/login/user", response_model=Token)
-@rate_limit(max_requests=10, time_window=300)  # 10 requests cada 5 minutos
+@rate_limit(max_requests=10, time_window=300)
 @validate_email_decorator
 @sanitize_input_decorator
 @async_safe
@@ -26,16 +26,36 @@ def login_user(form_data: UserLogin, db: Session = Depends(get_db)) -> Any:
     if not user.is_active:
         raise HTTPException(status_code=400, detail="Usuario desactivado")
 
+    # Manejar el rompecabezas criptográfico
+    crypto_manager = CryptoManager(db)
+    
+    # Si no hay respuesta al rompecabezas, generar uno nuevo
+    if not form_data.puzzle_response:
+        puzzle = crypto_manager.generar_rompecabezas_dispositivo(user.id, crypto_manager.server_id)
+        return {
+            "access_token": "",
+            "token_type": "bearer",
+            "user_id": user.id,
+            "puzzle": puzzle  # Enviar el rompecabezas al cliente
+        }
+    
+    # Verificar la respuesta al rompecabezas
+    verification = crypto_manager.verificar_rompecabezas_dispositivo(form_data.puzzle_response)
+    if not verification['valido']:
+        raise HTTPException(status_code=401, detail="Autenticación criptográfica fallida")
+
+    # Si todo está bien, generar el token
     access_token_expires = timedelta(minutes=60)
     access_token = create_access_token(
         data={"sub": user.email, "type": "user", "id": user.id},
         expires_delta=access_token_expires
     )
+    
     # safe role access
     role_name = None
     if getattr(user, "rol", None) and getattr(user.rol, "name", None):
         role_name = user.rol.name
-    elif getattr(user, "admin", None) and getattr(user.admin, "rol", None):
+    elif getattr(user, "admin", None) and getattr(user.admin.rol, None):
         role_name = getattr(user.admin.rol, "name", None)
 
     return {
@@ -45,9 +65,8 @@ def login_user(form_data: UserLogin, db: Session = Depends(get_db)) -> Any:
         "role": role_name
     }
 
-
 @router.post("/login/admin", response_model=Token)
-@rate_limit(max_requests=10, time_window=300)  # 10 requests cada 5 minutos
+@rate_limit(max_requests=10, time_window=300)
 @validate_email_decorator
 @sanitize_input_decorator
 @async_safe
@@ -71,9 +90,8 @@ def login_admin(form_data: UserLogin, db: Session = Depends(get_db)) -> Any:
         "role": role_name
     }
 
-
 @router.post("/login/manager", response_model=Token)
-@rate_limit(max_requests=10, time_window=300)  # 10 requests cada 5 minutos
+@rate_limit(max_requests=10, time_window=300)
 @validate_email_decorator
 @sanitize_input_decorator
 @async_safe
@@ -102,6 +120,24 @@ def login_device(device: DeviceLogin, db: Session = Depends(get_db)) -> Any:
     db_device = db.query(Device).filter(Device.id == device.device_id).first()
     if not db_device or not db_device.pasdispositivo or db_device.pasdispositivo.api_key != device.api_key:
         raise HTTPException(status_code=401, detail="Credenciales de dispositivo inválidas")
+
+    # Manejar el rompecabezas criptográfico
+    crypto_manager = CryptoManager(db)
+    
+    # Si no hay respuesta al rompecabezas, generar uno nuevo
+    if not device.puzzle_response:
+        puzzle = crypto_manager.generar_rompecabezas_dispositivo(db_device.id, crypto_manager.server_id)
+        return {
+            "access_token": "",
+            "token_type": "bearer",
+            "device_id": db_device.id,
+            "puzzle": puzzle
+        }
+    
+    # Verificar la respuesta al rompecabezas
+    verification = crypto_manager.verificar_rompecabezas_dispositivo(device.puzzle_response)
+    if not verification['valido']:
+        raise HTTPException(status_code=401, detail="Autenticación criptográfica fallida")
 
     access_token_expires = timedelta(minutes=1440)  # 24 horas
     access_token = create_access_token(

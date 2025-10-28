@@ -1,5 +1,5 @@
 from pydantic import BaseModel, EmailStr
-from typing import Optional
+from typing import Optional, Dict, Any
 
 class UserLogin(BaseModel):
     email: EmailStr

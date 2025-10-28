@@ -10,7 +10,6 @@ from models import User, Device, Admin, Manager
 from core.decorators import validate_email_decorator, sanitize_input_decorator, async_safe, rate_limit
 from core.services import AuthService
 from core.utils import ResponseFormatter
-from core.crypto_new import CryptoManager
 
 router = APIRouter(tags=["Authentication"])
 
@@ -35,7 +34,7 @@ def login_user(form_data: UserLogin, db: Session = Depends(get_db)) -> Any:
     role_name = None
     if getattr(user, "rol", None) and getattr(user.rol, "name", None):
         role_name = user.rol.name
-    elif getattr(user, "admin", None) and getattr(user.admin, "rol", None):
+    elif getattr(user, "admin", None) and getattr(user.admin.rol, None):
         role_name = getattr(user.admin.rol, "name", None)
 
     return {
