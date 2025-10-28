@@ -11,7 +11,7 @@ app = FastAPI(
 # Incluir routers
 app.include_router(auth.router, prefix="/api/v1/auth")
 app.include_router(users.router, prefix="/api/v1/users")
-# app.include_router(devices.router, prefix="/api/v1/devices")
+app.include_router(devices.router, prefix="/api/v1/devices")
 # app.include_router(alerts.router, prefix="/api/v1")
 
 # Configuración de OpenAPI (igual que antes)

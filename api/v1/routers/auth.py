@@ -13,6 +13,8 @@ from core.utils import ResponseFormatter
 
 router = APIRouter(tags=["Authentication"])
 
+from core.crypto import CryptoManager
+
 @router.post("/login/user", response_model=Token)
 @rate_limit(max_requests=10, time_window=300)  # 10 requests cada 5 minutos
 @validate_email_decorator
