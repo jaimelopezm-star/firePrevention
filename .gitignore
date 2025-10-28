@@ -1,0 +1,15 @@
+# Archivos de caché de Python
+__pycache__/
+*.pyc
+*.pyd
+*.pyo
+
+# Entornos virtuales
+.venv/
+venv/
+
+# Archivos de PyCharm
+.idea/
+
+# Archivos de depuración y logs
+*.log
