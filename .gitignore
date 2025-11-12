@@ -1,0 +1,25 @@
+# Variables de entorno
+.env
+
+# Datos de bases de datos
+mysql-data/
+mongo-data/
+redis-data/
+
+# Logs
+logs/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
+
+# Logs de Nginx
+nginx/logs/

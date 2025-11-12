@@ -1,0 +1,56 @@
+
+# ============================================================================
+# Dockerfile - Flask API para Plataforma IoT
+# ============================================================================
+
+# Imagen base: Python 3.11 slim (menor superficie de ataque)
+FROM python:3.11-slim
+
+# Metadatos
+LABEL maintainer="tu_email@ejemplo.com"
+LABEL description="Flask API para plataforma IoT - Proyecto Máster Ciberseguridad"
+LABEL version="1.0"
+
+# Variables de entorno
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+# Crear usuario no-root para ejecutar la aplicación
+RUN groupadd -r flask && useradd -r -g flask flask
+
+# Instalar dependencias del sistema
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    default-libmysqlclient-dev \
+    pkg-config \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Establecer directorio de trabajo
+WORKDIR /app
+
+# Copiar requirements y instalar dependencias Python
+COPY --chown=flask:flask requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copiar código de aplicación
+COPY --chown=flask:flask . .
+
+# Crear directorio de logs
+RUN mkdir -p /var/log/flask && chown -R flask:flask /var/log/flask
+
+# Cambiar a usuario no-root
+USER flask
+
+# Exponer puerto interno (no accesible desde fuera de Docker)
+EXPOSE 5000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD curl -f http://localhost:5000/health || exit 1
+
+# Comando de inicio con Gunicorn (producción)
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "2", "--threads", "4", "--timeout", "60", "--access-logfile", "/var/log/flask/access.log", "--error-logfile", "/var/log/flask/error.log", "app:app"]
+

@@ -1,0 +1,19 @@
+# Framework web
+Flask==3.0.0
+Flask-CORS==4.0.0
+
+# Bases de datos
+pymongo==4.6.1
+PyMySQL==1.1.0
+redis==5.0.1
+
+# Utilidades
+python-dotenv==1.0.0
+gunicorn==21.2.0
+
+# Seguridad (para futuro módulo de autenticación)
+PyJWT==2.8.0
+bcrypt==4.1.2
+
+# Validación
+marshmallow==3.20.1

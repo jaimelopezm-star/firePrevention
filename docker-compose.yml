@@ -1,0 +1,265 @@
+# ============================================================================
+# CONFIGURACIÓN DE REDES
+# ============================================================================
+networks:
+  iot-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+# ============================================================================
+# DEFINICIÓN DE SERVICIOS
+# ============================================================================
+services:
+
+  # ==========================================================================
+  # MySQL - Base de Datos Relacional
+  # Propósito: Almacenar usuarios, dispositivos, configuración
+  # Puerto: 3306 (SOLO red interna Docker, NO expuesto a host)
+  # ==========================================================================
+  mysql:
+    image: mysql:8.0
+    container_name: iot-mysql
+    restart: unless-stopped
+    
+    environment:
+      # SEGURIDAD: Cambiar estos valores antes de producción
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-tu_password_root_mysql_aqui}
+      MYSQL_DATABASE: iot_platform
+      MYSQL_USER: iot_user
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-tu_password_user_mysql_aqui}
+      
+      # Zona horaria
+      TZ: America/Mexico_City
+    
+    # NO EXPONER PUERTO: Comentar o eliminar la sección 'ports'
+    # ports:
+    #   - "3306:3306"  # NUNCA descomentar en producción
+    
+    volumes:
+      - ./mysql-data:/var/lib/mysql
+      - ./mysql-init:/docker-entrypoint-initdb.d:ro
+      - ./logs/mysql:/var/log/mysql
+    
+    networks:
+      iot-network:
+        ipv4_address: 172.20.0.10
+    
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p$${MYSQL_ROOT_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    
+    # Configuración de recursos
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+
+  # ==========================================================================
+  # MongoDB - Base de Datos NoSQL
+  # Propósito: Almacenar datos de sensores (time-series)
+  # Puerto: 27017 (SOLO red interna Docker, NO expuesto a host)
+  # ==========================================================================
+  mongodb:
+    image: mongo:7.0
+    container_name: iot-mongodb
+    restart: unless-stopped
+    
+    environment:
+      # SEGURIDAD: Cambiar estos valores antes de producción
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD:-tu_password_mongo_aqui}
+      MONGO_INITDB_DATABASE: iot_sensors
+      TZ: America/Mexico_City
+    
+    # NO EXPONER PUERTO: Comentar o eliminar la sección 'ports'
+    # ports:
+    #   - "27017:27017"  # NUNCA descomentar en producción
+    
+    volumes:
+      - ./mongo-data:/data/db
+      - ./mongo-init:/docker-entrypoint-initdb.d:ro
+      - ./logs/mongodb:/var/log/mongodb
+    
+    networks:
+      iot-network:
+        ipv4_address: 172.20.0.11
+    
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+
+  # ==========================================================================
+  # Redis - Caché y Gestión de Sesiones
+  # Propósito: Caché de datos, sesiones de usuario, rate limiting
+  # Puerto: 6379 (SOLO red interna Docker, NO expuesto a host)
+  # ==========================================================================
+  redis:
+    image: redis:7-alpine
+    container_name: iot-redis
+    restart: unless-stopped
+    
+    # Comando con contraseña y persistencia
+    command: >
+      redis-server
+      --requirepass ${REDIS_PASSWORD:-tu_password_redis_aqui}
+      --appendonly yes
+      --appendfilename "appendonly.aof"
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+    
+    # NO EXPONER PUERTO: Comentar o eliminar la sección 'ports'
+    # ports:
+    #   - "6379:6379"  # NUNCA descomentar en producción
+    
+    volumes:
+      - ./redis-data:/data
+      - ./logs/redis:/var/log/redis
+    
+    networks:
+      iot-network:
+        ipv4_address: 172.20.0.12
+    
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+
+# ==========================================================================
+# Nginx - Reverse Proxy (ACTUALIZADO)
+# ==========================================================================
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: iot-nginx
+    restart: unless-stopped
+    ports:
+      # EXPONER puertos al host (estos sí deben estar expuestos)
+      - "80:80"
+      - "443:443"
+    volumes:
+      # Configuración principal de Nginx
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      # Configuraciones de sitios
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      # Certificados SSL (para futuro)
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+      # Logs persistentes
+      - ./nginx/logs:/var/log/nginx
+    networks:
+      iot-network:
+        ipv4_address: 172.20.0.30
+    depends_on:
+      fastapi: 
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 128M
+        reservations:
+          cpus: '0.25'
+          memory: 64M
+
+  # ==========================================================================
+  # FastAPI - Aplicación Principal (ACTUALIZADO)
+  # Propósito: Endpoints REST, WebSocket, lógica de negocio (ahora asíncrona)
+  # Puerto: 5000 (SOLO red interna Docker, acceso vía Nginx)
+  # ==========================================================================
+  fastapi:
+    build:
+      context: ./fastapi-app
+      dockerfile: Dockerfile
+    container_name: iot-fastapi
+    restart: unless-stopped
+    environment:
+      # Configuración de bases de datos (usando nombres de servicio DNS)
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      MYSQL_USER: iot_user
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-tu_password_user_mysql_aqui}
+      MYSQL_DATABASE: iot_platform
+      MONGO_HOST: mongodb
+      MONGO_PORT: 27017
+      MONGO_USER: admin
+      MONGO_PASSWORD: ${MONGO_PASSWORD:-tu_password_mongo_aqui}
+      MONGO_DATABASE: iot_sensors
+      MONGO_AUTH_SOURCE: admin
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-tu_password_redis_aqui}
+      # Configuración de FastAPI
+      APP_ENV: production # Mantener por compatibilidad
+      SECRET_KEY: ${FASTAPI_SECRET_KEY:-cambiar_esta_clave_secreta}
+      # Directorio de logs (nueva variable de entorno)
+      LOGS_DIR: /var/log/fastapi
+      # Zona horaria
+      TZ: America/Mexico_City
+    # NO EXPONER PUERTO EXTERNO - Solo accesible desde Nginx
+    expose:
+      - "5000"
+    volumes:
+      # Código de aplicación (read-only para seguridad)
+      - ./fastapi-app:/app:ro
+      # Logs en ruta separada (read-write, fuera de /app)
+      - ./logs/fastapi:/var/log/fastapi 
+    networks:
+      iot-network:
+        ipv4_address: 172.20.0.20
+    depends_on:
+      mysql:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          cpus: '1.5'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
