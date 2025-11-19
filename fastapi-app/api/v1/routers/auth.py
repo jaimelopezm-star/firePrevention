@@ -1,6 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Header, Request
 from sqlalchemy.orm import Session
-from typing import Any
+from typing import Any, Optional
 
 from api.deps import get_db
 from schemas.auth import UserLogin, DeviceLogin, Token
@@ -12,7 +12,8 @@ from core.decorators import (
     sanitize_input_decorator,
     async_safe,
 )
-from core.services import AuthService
+from core.services import AuthService, SessionService
+from core.security import decode_token
  
 
 router = APIRouter(tags=["Authentication"])
@@ -24,9 +25,21 @@ router = APIRouter(tags=["Authentication"])
 @validate_email_decorator
 @sanitize_input_decorator
 @async_safe
-def login_user(form_data: UserLogin, db: Session = Depends(get_db)) -> Any:
-    """Login de usuario - siempre por contraseña"""
-    return AuthService.auth_by_password(User, "user", form_data.email, form_data.password, db)
+def login_user(form_data: UserLogin, request: Request, db: Session = Depends(get_db)) -> Any:
+    """
+    Login de usuario - siempre por contraseña.
+    
+    ⚠️ SESIÓN ÚNICA: Si ya tienes una sesión activa, este endpoint devolverá 409 Conflict.
+    Debes hacer logout primero usando POST /logout con tu token actual.
+    """
+    return AuthService.auth_by_password(
+        User, "user", 
+        form_data.email, 
+        form_data.password, 
+        db,
+        request_ip=request.client.host if request.client else None,
+        request_user_agent=request.headers.get("user-agent", "")
+    )
 
 
 @router.post("/login/admin", response_model=Token)
@@ -34,9 +47,21 @@ def login_user(form_data: UserLogin, db: Session = Depends(get_db)) -> Any:
 @validate_email_decorator
 @sanitize_input_decorator
 @async_safe
-def login_admin(form_data: UserLogin, db: Session = Depends(get_db)) -> Any:
-    """Login de admin - siempre por contraseña"""
-    return AuthService.auth_by_password(Admin, "admin", form_data.email, form_data.password, db)
+def login_admin(form_data: UserLogin, request: Request, db: Session = Depends(get_db)) -> Any:
+    """
+    Login de admin - siempre por contraseña.
+    
+    ⚠️ SESIÓN ÚNICA: Si ya tienes una sesión activa, este endpoint devolverá 409 Conflict.
+    Debes hacer logout primero usando POST /logout con tu token actual.
+    """
+    return AuthService.auth_by_password(
+        Admin, "admin", 
+        form_data.email, 
+        form_data.password, 
+        db,
+        request_ip=request.client.host if request.client else None,
+        request_user_agent=request.headers.get("user-agent", "")
+    )
 
 
 @router.post("/login/manager", response_model=Token)
@@ -44,16 +69,95 @@ def login_admin(form_data: UserLogin, db: Session = Depends(get_db)) -> Any:
 @validate_email_decorator
 @sanitize_input_decorator
 @async_safe
-def login_manager(form_data: UserLogin, db: Session = Depends(get_db)) -> Any:
-    """Login de manager - siempre por contraseña"""
-    return AuthService.auth_by_password(Manager, "manager", form_data.email, form_data.password, db)
+def login_manager(form_data: UserLogin, request: Request, db: Session = Depends(get_db)) -> Any:
+    """
+    Login de manager - siempre por contraseña.
+    
+    ⚠️ SESIÓN ÚNICA: Si ya tienes una sesión activa, este endpoint devolverá 409 Conflict.
+    Debes hacer logout primero usando POST /logout con tu token actual.
+    """
+    return AuthService.auth_by_password(
+        Manager, "manager", 
+        form_data.email, 
+        form_data.password, 
+        db,
+        request_ip=request.client.host if request.client else None,
+        request_user_agent=request.headers.get("user-agent", "")
+    )
 
 @router.post("/device/login", response_model=Token)
 @sanitize_input_decorator
 @async_safe
-def login_device(device: DeviceLogin, db: Session = Depends(get_db)) -> Any:
-    """Login de dispositivo - Siempre usa rompecabezas criptográfico"""
-    return AuthService.auth_by_puzzle_device(device.device_id, device.api_key, device.puzzle_response, db)
+def login_device(device: DeviceLogin, request: Request, db: Session = Depends(get_db)) -> Any:
+    """
+    Login de dispositivo - Siempre usa rompecabezas criptográfico.
+    
+    ⚠️ SESIÓN ÚNICA: Si el dispositivo ya tiene una sesión activa, devolverá 409 Conflict.
+    El dispositivo debe hacer logout primero.
+    """
+    return AuthService.auth_by_puzzle_device(
+        device.device_id, 
+        device.api_key, 
+        device.puzzle_response, 
+        db,
+        request_ip=request.client.host if request.client else None,
+        request_user_agent=request.headers.get("user-agent", "")
+    )
+
+
+@router.post("/logout", status_code=204)
+@async_safe
+def logout(request: Request, authorization: Optional[str] = Header(None)):
+    """
+    Cierra la sesión actual invalidando el token en Redis.
+    
+    Requiere el token JWT en el header Authorization: Bearer <token>
+    
+    Devuelve:
+    - 204 No Content: Logout exitoso
+    - 401 Unauthorized: Token inválido o faltante
+    
+    Nota: Después del logout, el token ya no podrá usarse para autenticar requests,
+    incluso si aún no ha expirado.
+    """
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token de autorización requerido",
+            headers={"WWW-Authenticate": "Bearer"}
+        )
+    
+    token = authorization.split(" ")[1]
+    
+    try:
+        # Decodificar token para obtener user_id y user_type
+        payload = decode_token(token)
+        user_id = payload.get("id")
+        user_type = payload.get("type")
+        
+        if not user_id or not user_type:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Token inválido"
+            )
+        
+        # Invalidar sesión en Redis y registrar en CSV
+        SessionService.invalidate_session(
+            user_id, 
+            user_type, 
+            reason="manual",
+            ip=request.client.host if request.client else None
+        )
+        
+        return  # 204 No Content (sin body)
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error al cerrar sesión: {str(e)}"
+        )
 
 
 # ============================================================================

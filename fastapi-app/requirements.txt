@@ -9,3 +9,4 @@ mysqlclient==2.2.4
 argon2-cffi==23.1.0
 alembic==1.13.1
 pycryptodome==3.20.0
+redis==5.0.1

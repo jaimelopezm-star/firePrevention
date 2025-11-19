@@ -7,7 +7,8 @@ from jose import jwt
 from database import get_db
 from models import User, Device, PasUsuario, PasDispositivo, Admin, Manager
 from core.config import settings
-from core.security import verify_password
+from core.security import verify_password, decode_token
+from core.services import SessionService
 
 security = HTTPBearer()
 
@@ -16,6 +17,12 @@ def get_current_user_or_device(
         credentials=Depends(security),
         db: Session = Depends(get_db)
 ):
+    """
+    Dependencia de FastAPI que valida tokens JWT y verifica sesión activa en Redis.
+    
+    IMPORTANTE: Ahora valida que el token esté activo en Redis (no revocado por logout).
+    Si el token fue invalidado mediante /logout, esta función rechaza el request.
+    """
     token = credentials.credentials
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -24,9 +31,30 @@ def get_current_user_or_device(
     )
 
     try:
-        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+        # Decodificar token JWT (valida firma y expiración)
+        payload = decode_token(token)
+        
         sub = payload.get("sub")
         token_type = payload.get("type")
+        user_id = payload.get("id")
+        jti = payload.get("jti")
+        
+        if not jti:
+            # Token antiguo sin JTI (generado antes de implementar sesiones)
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Token no compatible con sistema de sesiones. Inicia sesión nuevamente."
+            )
+        
+        # *** VALIDAR QUE EL TOKEN ESTÉ ACTIVO EN REDIS ***
+        # Solo validamos sesiones para user/admin/manager (no dispositivos por ahora)
+        if token_type in ["user", "admin", "manager"]:
+            if not SessionService.verify_token_session(user_id, token_type, jti):
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Sesión inválida o cerrada. Inicia sesión nuevamente.",
+                    headers={"WWW-Authenticate": "Bearer"}
+                )
 
         if token_type == "user":
             # Buscar usuario por email (asumiendo que 'sub' es el email)
@@ -67,7 +95,9 @@ def get_current_user_or_device(
         else:
             raise credentials_exception
 
-    except Exception:
+    except HTTPException:
+        raise
+    except Exception as e:
         raise credentials_exception
 
 

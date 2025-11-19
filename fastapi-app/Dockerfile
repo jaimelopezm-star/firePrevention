@@ -36,8 +36,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copiar código de aplicación
 COPY --chown=fastapi:fastapi . .
 
-# Crear directorio de logs en /var/log/fastapi (ruta estándar Linux)
-RUN mkdir -p /var/log/fastapi && chown -R fastapi:fastapi /var/log/fastapi
+# Crear directorios de logs (ANTES de cambiar a usuario no-root)
+RUN mkdir -p /var/log/fastapi/sessions && chown -R fastapi:fastapi /var/log/fastapi
 
 # Cambiar a usuario no-root
 USER fastapi
