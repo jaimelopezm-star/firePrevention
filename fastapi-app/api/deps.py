@@ -5,7 +5,9 @@ from sqlalchemy.orm import Session
 from jose import jwt
 
 from database import get_db
-from models import User, Device, PasUsuario, PasDispositivo, Admin, Manager
+from models import User, Device, PasUsuario, PasDispositivo, Admin, Manager, Role
+from models.permission import Permission
+from models.relationships import rol_permiso
 from core.config import settings
 from core.security import verify_password, decode_token
 from core.services import SessionService
@@ -47,14 +49,32 @@ def get_current_user_or_device(
             )
         
         # *** VALIDAR QUE EL TOKEN ESTÉ ACTIVO EN REDIS ***
-        # Solo validamos sesiones para user/admin/manager (no dispositivos por ahora)
-        if token_type in ["user", "admin", "manager"]:
-            if not SessionService.verify_token_session(user_id, token_type, jti):
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="Sesión inválida o cerrada. Inicia sesión nuevamente.",
-                    headers={"WWW-Authenticate": "Bearer"}
-                )
+        # Validamos sesiones para todos los tipos, incluyendo 'device'.
+        # Nota: para usuarios/admins/managers usamos el claim 'id',
+        # pero para dispositivos el claim 'sub' contiene el device_id.
+        user_id_for_session = None
+        if token_type == "device":
+            # 'sub' fue creado como el device.id en el flujo de login de dispositivos
+            user_id_for_session = int(sub) if sub is not None else None
+        else:
+            # usuarios/admins/managers usan el claim 'id'
+            user_id_for_session = user_id
+
+        # Si no tenemos un id válido para comparar en Redis, rechazamos
+        if user_id_for_session is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Token inválido o incompleto (sin id)",
+                headers={"WWW-Authenticate": "Bearer"}
+            )
+
+        # Verificamos que el JTI coincida con la sesión activa en Redis
+        if not SessionService.verify_token_session(user_id_for_session, token_type, jti):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Sesión inválida o cerrada. Inicia sesión nuevamente.",
+                headers={"WWW-Authenticate": "Bearer"}
+            )
 
         if token_type == "user":
             # Buscar usuario por email (asumiendo que 'sub' es el email)
@@ -101,15 +121,15 @@ def get_current_user_or_device(
         raise credentials_exception
 
 
-def get_current_user(db: Session = Depends(get_db)):
-    result = get_current_user_or_device(db=db)
+def get_current_user(credentials=Depends(security), db: Session = Depends(get_db)):
+    result = get_current_user_or_device(credentials=credentials, db=db)
     if result["type"] != "user":
         raise HTTPException(status_code=403, detail="Solo usuarios pueden acceder")
     return result["data"]
 
 
-def get_current_device(db: Session = Depends(get_db)):
-    result = get_current_user_or_device(db=db)
+def get_current_device(credentials=Depends(security), db: Session = Depends(get_db)):
+    result = get_current_user_or_device(credentials=credentials, db=db)
     if result["type"] != "device":
         raise HTTPException(status_code=403, detail="Solo dispositivos pueden acceder")
     return result["data"]
@@ -122,3 +142,41 @@ def require_role(role_name: str):
         return current_user
 
     return role_checker
+
+
+def require_permission(permission_name: str):
+    """
+    Valida que el principal autenticado (usuario/admin/manager) posea el permiso solicitado.
+
+    Permite granularidad por permisos usando las tablas `rol`, `permiso`, `rol_permiso`.
+    """
+    def permission_checker(
+        principal=Depends(get_current_user_or_device),
+        db: Session = Depends(get_db)
+    ):
+        principal_type = principal["type"]
+        principal_obj = principal["data"]
+
+        # Dispositivos no participan en permisos de administración
+        if principal_type == "device":
+            raise HTTPException(status_code=403, detail="No autorizado (solo usuarios/admins/managers)")
+
+        # Resolver rol según el tipo
+        rol_id = getattr(principal_obj, "rol_id", None)
+        if not rol_id:
+            raise HTTPException(status_code=403, detail="Principal sin rol asignado")
+
+        # Verificar si el rol tiene el permiso solicitado
+        has_perm = (
+            db.query(Permission)
+            .join(rol_permiso, rol_permiso.c.permiso_id == Permission.id)
+            .filter(rol_permiso.c.role_id == rol_id, Permission.name == permission_name)
+            .first()
+        )
+
+        if not has_perm:
+            raise HTTPException(status_code=403, detail=f"Permiso requerido: {permission_name}")
+
+        return principal_obj
+
+    return permission_checker

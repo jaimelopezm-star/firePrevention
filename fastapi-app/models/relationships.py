@@ -7,7 +7,7 @@ from database import Base
 rol_permiso = Table(
     "rol_permiso",
     Base.metadata,
-    Column("rol_id", Integer, ForeignKey("rol.id"), primary_key=True),
+    Column("role_id", Integer, ForeignKey("rol.id"), primary_key=True),
     Column("permiso_id", Integer, ForeignKey("permiso.id"), primary_key=True),
     Column("created_at", DateTime, default=datetime.utcnow)
 )

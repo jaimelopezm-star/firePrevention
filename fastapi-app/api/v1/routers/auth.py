@@ -132,7 +132,7 @@ def logout(request: Request, authorization: Optional[str] = Header(None)):
     try:
         # Decodificar token para obtener user_id y user_type
         payload = decode_token(token)
-        user_id = payload.get("id")
+        user_id = payload.get("sub")  # El ID está en "sub" no en "id"
         user_type = payload.get("type")
         
         if not user_id or not user_type:

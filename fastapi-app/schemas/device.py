@@ -7,6 +7,9 @@ class DeviceBase(BaseModel):
     device_type: str
     is_active: bool = True
 
+class DeviceCreate(DeviceBase):
+    admin_id: int
+
 class DeviceResponse(DeviceBase):
     id: int
     created_at: datetime

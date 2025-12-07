@@ -14,10 +14,13 @@ class Manager(Base):
     # ✅ Según tu BD, Manager tiene admin_id y pasgerente_id
     admin_id = Column(Integer, ForeignKey("admin.id"))
     pasgerente_id = Column(Integer, ForeignKey("pasgerente.id"))
+    # ✅ Añadimos rol_id para que los managers participen del sistema de permisos
+    rol_id = Column(Integer, ForeignKey("rol.id"), nullable=True)
 
     # ✅ Relaciones CORRECTAS según tu BD
     admin = relationship("Admin", back_populates="managers")
     pasgerente = relationship("PasGerente", back_populates="gerente")
+    rol = relationship("Role")
 
     # ❌ ELIMINAR - Manager NO tiene user_id en tu BD
     # user_id = Column(Integer, ForeignKey("usuario.id"))

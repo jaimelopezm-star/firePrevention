@@ -15,6 +15,14 @@ class Settings:
     REDIS_HOST: str = os.getenv("REDIS_HOST", "localhost")
     REDIS_PORT: int = int(os.getenv("REDIS_PORT", 6379))
     REDIS_PASSWORD: str = os.getenv("REDIS_PASSWORD", "")
+    
+    # Configuración MongoDB
+    MONGO_HOST: str = os.getenv("MONGO_HOST", "localhost")
+    MONGO_PORT: int = int(os.getenv("MONGO_PORT", 27017))
+    MONGO_USER: str = os.getenv("MONGO_USER", "admin")
+    MONGO_PASSWORD: str = os.getenv("MONGO_PASSWORD", "")
+    MONGO_DATABASE: str = os.getenv("MONGO_DATABASE", "iot_sensors")
+    MONGO_AUTH_SOURCE: str = os.getenv("MONGO_AUTH_SOURCE", "admin")
 
 settings = Settings()
 

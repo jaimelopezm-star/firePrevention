@@ -18,3 +18,22 @@ class UserResponse(UserBase):
 
     class Config:
         from_attributes = True
+
+
+# ========== SCHEMAS PARA MANAGERS ==========
+
+class ManagerBase(BaseModel):
+    nombre: str
+    email: EmailStr
+
+class ManagerCreate(ManagerBase):
+    password: str
+    admin_id: int
+
+class ManagerResponse(ManagerBase):
+    id: int
+    admin_id: int
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
